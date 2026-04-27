@@ -244,83 +244,6 @@ const tokenizeCss = createTokenizer(cssPattern, (m) => {
 });
 
 // ---------------------------------------------------------------------------
-// Python
-// ---------------------------------------------------------------------------
-
-const tokenizePython = createTokenizer(
-  new RegExp(
-    [
-      `(#.*)`,                                           // comments
-      `("""[\\s\\S]*?"""|'''[\\s\\S]*?'''|"(?:[^"\\\\]|\\\\.)*"|'(?:[^'\\\\]|\\\\.)*')`, // strings
-      `(\\b\\d+(?:\\.\\d+)?\\b)`,                        // numbers
-      `(\\b(?:def|class|if|elif|else|for|while|return|import|from|with|as|try|except|finally|raise|yield|async|await|pass|break|continue|lambda|in|not|and|or|is|None|True|False|self|cls)\\b)`, // keywords
-      `(@\\w+)`,                                         // decorators
-      `(\\b(?:int|str|float|list|dict|tuple|set|bool|bytes|type|Optional|Union|Any|List|Dict|Tuple|Set|Callable)\\b)`, // types
-    ].join('|'),
-    'g'
-  ),
-  (m: RegExpExecArray) => {
-    if (m[1]) return 't-cmt';
-    if (m[2]) return 't-str';
-    if (m[3]) return 't-num';
-    if (m[4]) return 't-kw';
-    if (m[5]) return 't-kw';
-    if (m[6]) return 't-typ';
-    return '';
-  }
-);
-
-// ---------------------------------------------------------------------------
-// TypeScript (extends JS with type keywords)
-// ---------------------------------------------------------------------------
-
-const tokenizeTypeScript = createTokenizer(
-  new RegExp(
-    [
-      `(\\/\\/.*|\\/\\*[\\s\\S]*?\\*\\/)`,
-      `("(?:[^"\\\\]|\\\\.)*"|'(?:[^'\\\\]|\\\\.)*'|\`(?:[^\`\\\\]|\\\\.)*\`)`,
-      `(\\b\\d+(?:\\.\\d+)?\\b)`,
-      `(\\b(?:import|export|from|const|let|var|function|return|if|else|for|while|class|extends|implements|new|this|super|async|await|try|catch|throw|typeof|instanceof|interface|type|enum|namespace|declare|abstract|readonly|public|private|protected|static|override|as|is|in|of|keyof|infer|never|void|null|undefined|true|false)\\b)`,
-      `(\\b(?:string|number|boolean|any|unknown|object|Array|Promise|Record|Partial|Required|Omit|Pick|Map|Set)\\b)`,
-    ].join('|'),
-    'g'
-  ),
-  (m: RegExpExecArray) => {
-    if (m[1]) return 't-cmt';
-    if (m[2]) return 't-str';
-    if (m[3]) return 't-num';
-    if (m[4]) return 't-kw';
-    if (m[5]) return 't-typ';
-    return '';
-  }
-);
-
-// ---------------------------------------------------------------------------
-// TOML / Config
-// ---------------------------------------------------------------------------
-
-const tokenizeToml = createTokenizer(
-  new RegExp(
-    [
-      `(#.*)`,
-      `("(?:[^"\\\\]|\\\\.)*"|'(?:[^'\\\\]|\\\\.)*')`,
-      `(\\b\\d+(?:\\.\\d+)?\\b)`,
-      `(\\b(?:true|false)\\b)`,
-      `(\\[[^\\]]+\\])`,
-    ].join('|'),
-    'g'
-  ),
-  (m: RegExpExecArray) => {
-    if (m[1]) return 't-cmt';
-    if (m[2]) return 't-str';
-    if (m[3]) return 't-num';
-    if (m[4]) return 't-kw';
-    if (m[5]) return 't-prop';
-    return '';
-  }
-);
-
-// ---------------------------------------------------------------------------
 // Markdown / Other — no highlighting
 // ---------------------------------------------------------------------------
 
@@ -334,18 +257,13 @@ function tokenizePlain(text: string): Token[] {
 
 const tokenizers: Record<string, (text: string) => Token[]> = {
   csharp: tokenizeCSharp,
-  python: tokenizePython,
-  typescript: tokenizeTypeScript,
   json: tokenizeJson,
   yaml: tokenizeYaml,
   sql: tokenizeSql,
   xml: tokenizeXml,
   javascript: tokenizeJs,
   css: tokenizeCss,
-  toml: tokenizeToml,
-  config: tokenizeToml,
   markdown: tokenizePlain,
-  plain: tokenizePlain,
   other: tokenizePlain,
 };
 

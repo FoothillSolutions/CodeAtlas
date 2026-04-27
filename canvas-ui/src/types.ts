@@ -1,11 +1,13 @@
 export interface MrGraph {
   branchName: string;
+  repoName: string;
   totalFiles: number;
   totalAdditions: number;
   totalDeletions: number;
   files: MrFileNode[];
   edges: MrEdge[];
   config?: CanvasConfig;
+  schemaVersion?: number;
 }
 
 export interface MrFileNode {
@@ -21,6 +23,8 @@ export interface MrFileNode {
   dependencies: MrDependency[];
   methodCalls: MrMethodCall[];
   projectName: string;
+  namespace?: string | null;
+  impactRadius?: number;
 }
 
 export interface MrCodeSection {
@@ -44,6 +48,7 @@ export interface MrMethodCall {
   targetInterface: string;
   calledMethod: string;
   isInChangedCode: boolean;
+  callOrder?: number;
 }
 
 export interface MrEdge {

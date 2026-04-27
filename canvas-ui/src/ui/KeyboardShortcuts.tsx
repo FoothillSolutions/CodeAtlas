@@ -13,9 +13,12 @@ import {
   setPan,
   searchVisible,
   markDirty,
-  toggleSemanticZoom,
+  cycleLodPinMode,
+  toggleOverlay,
 } from '../state/ui-store';
 import { setReviewStatus } from '../state/review-store';
+import { toggleChatPanel } from '../state/chat-store';
+import { colors } from '../theme/tokens';
 
 const showHelp = signal(false);
 
@@ -32,7 +35,10 @@ export const shortcuts: { key: string; description: string }[] = [
   { key: 'r', description: 'Mark selected file as reviewed' },
   { key: 'f', description: 'Mark selected file as flagged' },
   { key: 'u', description: 'Mark selected file as unreviewed' },
-  { key: 's', description: 'Toggle semantic zoom (overview mode)' },
+  { key: 's', description: 'Cycle LOD mode: auto → glyph → full' },
+  { key: 'h', description: 'Toggle risk heatmap overlay' },
+  { key: 'i', description: 'Toggle critical paths overlay' },
+  { key: 'a', description: 'Toggle AI review chat panel' },
   { key: '↑', description: 'Pan up' },
   { key: '↓', description: 'Pan down' },
   { key: '←', description: 'Pan left' },
@@ -123,52 +129,44 @@ export function KeyboardShortcuts({ onFitAll }: KeyboardShortcutsProps) {
         return;
       }
 
-      // Review shortcuts -- only when a node is selected
       if ((key === 'r' || key === 'f' || key === 'u') && selectedNodeId.value) {
         e.preventDefault();
         const file = files.value.find(f => f.id === selectedNodeId.value);
         if (!file) return;
-
-        if (key === 'r') setReviewStatus(file.filePath, 'reviewed');
-        else if (key === 'f') setReviewStatus(file.filePath, 'flagged');
-        else if (key === 'u') setReviewStatus(file.filePath, 'unreviewed');
+        const statusMap: Record<string, 'reviewed' | 'flagged' | 'unreviewed'> = {
+          r: 'reviewed', f: 'flagged', u: 'unreviewed',
+        };
+        setReviewStatus(file.filePath, statusMap[key]);
         markDirty();
         return;
       }
 
-      // Toggle semantic zoom
-      if (key === 's' && !selectedNodeId.value) {
+      const panMap: Record<string, [number, number]> = {
+        ArrowUp:    [0,  PAN_STEP],
+        ArrowDown:  [0, -PAN_STEP],
+        ArrowLeft:  [ PAN_STEP, 0],
+        ArrowRight: [-PAN_STEP, 0],
+      };
+      if (key in panMap) {
         e.preventDefault();
-        toggleSemanticZoom();
+        const [dx, dy] = panMap[key];
+        setPan(panX.value + dx, panY.value + dy);
         return;
       }
 
-      // Arrow keys: pan
-      if (key === 'ArrowUp') {
-        e.preventDefault();
-        setPan(panX.value, panY.value + PAN_STEP);
-        return;
-      }
-      if (key === 'ArrowDown') {
-        e.preventDefault();
-        setPan(panX.value, panY.value - PAN_STEP);
-        return;
-      }
-      if (key === 'ArrowLeft') {
-        e.preventDefault();
-        setPan(panX.value + PAN_STEP, panY.value);
-        return;
-      }
-      if (key === 'ArrowRight') {
-        e.preventDefault();
-        setPan(panX.value - PAN_STEP, panY.value);
-        return;
-      }
-
-      // ? : toggle help overlay
       if (key === '?') {
         e.preventDefault();
         showHelp.value = !showHelp.value;
+        return;
+      }
+
+      const overlayMap: Record<string, 'risk-heatmap' | 'critical-paths'> = {
+        h: 'risk-heatmap',
+        i: 'critical-paths',
+      };
+      if (key in overlayMap) {
+        e.preventDefault();
+        toggleOverlay(overlayMap[key]);
         return;
       }
     }
@@ -187,7 +185,7 @@ export function KeyboardShortcuts({ onFitAll }: KeyboardShortcutsProps) {
         left: 0,
         right: 0,
         bottom: 0,
-        background: 'rgba(0, 0, 0, 0.7)',
+        background: colors.bg.overlayDark,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -197,15 +195,15 @@ export function KeyboardShortcuts({ onFitAll }: KeyboardShortcutsProps) {
     >
       <div
         style={{
-          background: '#161b22',
-          border: '1px solid #30363d',
+          background: colors.bg.primary,
+          border: `1px solid ${colors.border.default}`,
           borderRadius: '12px',
           padding: '24px 32px',
           maxWidth: '480px',
           width: '90vw',
           maxHeight: '80vh',
           overflowY: 'auto',
-          color: '#e6edf3',
+          color: colors.text.secondary,
         }}
         onClick={(e: Event) => e.stopPropagation()}
       >
@@ -214,8 +212,8 @@ export function KeyboardShortcuts({ onFitAll }: KeyboardShortcutsProps) {
             margin: '0 0 16px 0',
             fontSize: '18px',
             fontWeight: 600,
-            color: '#f0f6fc',
-            borderBottom: '1px solid #30363d',
+            color: colors.text.primary,
+            borderBottom: `1px solid ${colors.border.default}`,
             paddingBottom: '12px',
           }}
         >
@@ -224,7 +222,7 @@ export function KeyboardShortcuts({ onFitAll }: KeyboardShortcutsProps) {
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <tbody>
             {shortcuts.map(s => (
-              <tr key={s.key} style={{ borderBottom: '1px solid #21262d' }}>
+              <tr key={s.key} style={{ borderBottom: `1px solid ${colors.border.subtle}` }}>
                 <td
                   style={{
                     padding: '8px 12px 8px 0',
@@ -234,13 +232,13 @@ export function KeyboardShortcuts({ onFitAll }: KeyboardShortcutsProps) {
                 >
                   <kbd
                     style={{
-                      background: '#21262d',
-                      border: '1px solid #30363d',
+                      background: colors.bg.tertiary,
+                      border: `1px solid ${colors.border.default}`,
                       borderRadius: '6px',
                       padding: '2px 8px',
                       fontSize: '13px',
                       fontFamily: 'monospace',
-                      color: '#c9d1d9',
+                      color: colors.text.secondary,
                     }}
                   >
                     {s.key}
@@ -250,7 +248,7 @@ export function KeyboardShortcuts({ onFitAll }: KeyboardShortcutsProps) {
                   style={{
                     padding: '8px 0',
                     fontSize: '14px',
-                    color: '#8b949e',
+                    color: colors.text.tertiary,
                   }}
                 >
                   {s.description}
@@ -263,11 +261,11 @@ export function KeyboardShortcuts({ onFitAll }: KeyboardShortcutsProps) {
           style={{
             margin: '16px 0 0 0',
             fontSize: '12px',
-            color: '#484f58',
+            color: colors.text.muted,
             textAlign: 'center',
           }}
         >
-          Press <kbd style={{ background: '#21262d', border: '1px solid #30363d', borderRadius: '4px', padding: '1px 5px', fontFamily: 'monospace', fontSize: '12px' }}>?</kbd> or <kbd style={{ background: '#21262d', border: '1px solid #30363d', borderRadius: '4px', padding: '1px 5px', fontFamily: 'monospace', fontSize: '12px' }}>Esc</kbd> to close
+          Press <kbd style={{ background: colors.bg.tertiary, border: `1px solid ${colors.border.default}`, borderRadius: '4px', padding: '1px 5px', fontFamily: 'monospace', fontSize: '12px' }}>?</kbd> or <kbd style={{ background: colors.bg.tertiary, border: `1px solid ${colors.border.default}`, borderRadius: '4px', padding: '1px 5px', fontFamily: 'monospace', fontSize: '12px' }}>Esc</kbd> to close
         </p>
       </div>
     </div>

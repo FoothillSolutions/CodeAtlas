@@ -127,23 +127,7 @@ public class DiffFile
     public string FileName => System.IO.Path.GetFileName(Path);
     public bool IsCSharp => Path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase);
 
-    public string FileType => System.IO.Path.GetExtension(Path).ToLowerInvariant() switch
-    {
-        ".cs" => "csharp",
-        ".py" => "python",
-        ".ts" or ".tsx" => "typescript",
-        ".js" or ".jsx" => "javascript",
-        ".json" => "json",
-        ".yaml" or ".yml" => "yaml",
-        ".css" or ".scss" or ".less" => "css",
-        ".html" or ".htm" => "html",
-        ".sql" => "sql",
-        ".xml" or ".csproj" or ".props" or ".targets" => "xml",
-        ".md" => "markdown",
-        ".toml" => "toml",
-        ".cfg" or ".ini" or ".conf" => "config",
-        _ => "plain"
-    };
+    public string FileType => GraphHelpers.DetectFileType(Path);
 
     public int Additions => Hunks.Sum(h => h.Lines.Count(l => l.Type == DiffLineType.Add));
     public int Deletions => Hunks.Sum(h => h.Lines.Count(l => l.Type == DiffLineType.Remove));

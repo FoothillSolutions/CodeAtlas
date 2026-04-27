@@ -1,0 +1,8 @@
+{
+  "repos_parent_dir": "/Users/malikziq/R365",
+  "repo_overrides": {
+    "r365": {
+      "sln": "/Users/malikziq/R365/r365/Application/R365.sln"
+    }
+  }
+}

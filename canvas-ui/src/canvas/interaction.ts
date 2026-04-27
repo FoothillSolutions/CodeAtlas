@@ -1,10 +1,11 @@
 import {
   zoom, panX, panY, setZoom, setPan, markDirty,
   selectedNodeId, expandedNodeId, selectNode, expandNode, hoverNode, hoverEdge, screenToWorld,
-  layoutLocked
+  layoutLocked, viewMode, toggleProjectExpanded, expandedProjects
 } from '../state/ui-store';
-import { nodePositions, updateNodePosition, arrowRoutes, rerouteArrows } from '../state/graph-store';
+import { nodePositions, updateNodePosition, arrowRoutes, rerouteArrows, archLayout } from '../state/graph-store';
 import { getDPR } from './canvas-renderer';
+import { dimensions } from '../theme/tokens';
 
 let isPanning = false;
 let isDragging = false;
@@ -37,8 +38,10 @@ function getCanvasOffset(canvas: HTMLCanvasElement, e: MouseEvent): { x: number;
 }
 
 function hitTestNode(worldX: number, worldY: number): string | null {
+  if (viewMode.value === 'arch') {
+    return hitTestArchNode(worldX, worldY);
+  }
   const positions = nodePositions.value;
-  // Iterate in reverse (top nodes first)
   const entries = Array.from(positions.entries()).reverse();
   for (const [id, pos] of entries) {
     if (worldX >= pos.x && worldX <= pos.x + pos.width &&
@@ -49,15 +52,42 @@ function hitTestNode(worldX: number, worldY: number): string | null {
   return null;
 }
 
+function hitTestArchNode(worldX: number, worldY: number): string | null {
+  const layout = archLayout.value;
+  if (!layout) return null;
+
+  const expanded = expandedProjects.value;
+  for (const projName of expanded) {
+    const projNode = layout.projectNodes.get(projName);
+    if (!projNode) continue;
+    for (const file of projNode.files) {
+      const subPos = layout.subNodePositions.get(file.id);
+      if (!subPos) continue;
+      if (worldX >= subPos.x && worldX <= subPos.x + subPos.width &&
+          worldY >= subPos.y && worldY <= subPos.y + subPos.height) {
+        return file.id;
+      }
+    }
+  }
+
+  for (const [projName, pos] of layout.projectPositions) {
+    if (worldX >= pos.x && worldX <= pos.x + pos.width &&
+        worldY >= pos.y && worldY <= pos.y + pos.height) {
+      return `arch:${projName}`;
+    }
+  }
+  return null;
+}
+
 function hitTestEdge(worldX: number, worldY: number): number | null {
   const routes = arrowRoutes.value;
-  const threshold = 8;
+  const threshold = dimensions.edgeHitThreshold;
 
   for (let i = 0; i < routes.length; i++) {
-    const waypoints = routes[i].waypoints;
-    for (let j = 0; j < waypoints.length - 1; j++) {
-      const a = waypoints[j];
-      const b = waypoints[j + 1];
+    const poly = routes[i].hitPoly;
+    for (let j = 0; j < poly.length - 1; j++) {
+      const a = poly[j];
+      const b = poly[j + 1];
       const dist = pointToSegmentDistance(worldX, worldY, a.x, a.y, b.x, b.y);
       if (dist < threshold) return i;
     }
@@ -91,8 +121,13 @@ function onMouseDown(e: MouseEvent) {
   const hitNode = hitTestNode(world.x, world.y);
 
   if (hitNode) {
+    if (viewMode.value === 'arch' && hitNode.startsWith('arch:')) {
+      const projName = hitNode.slice(5);
+      toggleProjectExpanded(projName);
+      return;
+    }
     selectNode(hitNode);
-    if (!layoutLocked.value) {
+    if (!layoutLocked.value && viewMode.value === 'diff') {
       isDragging = true;
       dragNodeId = hitNode;
       const pos = nodePositions.value.get(hitNode)!;
@@ -180,6 +215,11 @@ function onDblClick(e: MouseEvent) {
 
   const hitNode = hitTestNode(world.x, world.y);
   if (hitNode) {
-    expandNode(hitNode);
+    if (viewMode.value === 'arch' && hitNode.startsWith('arch:')) {
+      return;
+    }
+    if (viewMode.value === 'diff') {
+      expandNode(hitNode);
+    }
   }
 }

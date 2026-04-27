@@ -1,10 +1,38 @@
 import { useState } from 'preact/hooks';
+import type { ComponentChildren } from 'preact';
+import type { JSX } from 'preact';
 import { expandedNodeId, selectNode } from '../state/ui-store';
 import { files } from '../state/graph-store';
-import { getReviewStatus, setReviewStatus, cycleReviewStatus } from '../state/review-store';
+import { cycleReviewStatus, getReviewStatus } from '../state/review-store';
 import type { ReviewStatus } from '../state/review-store';
 import { CodeLine } from './CodeLine';
-import type { MrFileNode, MrCodeSection } from '../types';
+import type { MrCodeSection } from '../types';
+import { colors } from '../theme/tokens';
+
+const reviewStatusBg: Record<ReviewStatus, string> = {
+  reviewed: colors.review.reviewedBg,
+  flagged: colors.review.flaggedBg,
+  'needs-attention': colors.review.attentionBg,
+  unreviewed: colors.bg.tertiary,
+};
+
+const reviewStatusLabel: Record<ReviewStatus, string> = {
+  unreviewed: 'Mark Reviewed',
+  reviewed: 'Reviewed',
+  flagged: 'Flagged',
+  'needs-attention': 'Attention',
+};
+
+function SmallButton({ onClick, children }: { onClick: () => void; children: ComponentChildren }) {
+  return (
+    <button
+      onClick={onClick}
+      style={styles.smallButton}
+    >
+      {children}
+    </button>
+  );
+}
 
 function navigateFile(direction: 1 | -1) {
   const nodeId = expandedNodeId.value;
@@ -20,10 +48,10 @@ function navigateFile(direction: 1 | -1) {
     nextIndex = currentIndex <= 0 ? fileList.length - 1 : currentIndex - 1;
   }
 
-  const nextId = fileList[nextIndex].id;
-  expandedNodeId.value = nextId;
-  selectNode(nextId);
+  expandedNodeId.value = fileList[nextIndex].id;
+  selectNode(fileList[nextIndex].id);
 }
+
 export function CodeCard() {
   const nodeId = expandedNodeId.value;
   if (!nodeId) return null;
@@ -32,7 +60,6 @@ export function CodeCard() {
   if (!file) return null;
 
   const reviewStatus = getReviewStatus(file.filePath);
-
   const [collapsedSections, setCollapsedSections] = useState<Set<number>>(new Set());
 
   const toggleSection = (index: number) => {
@@ -42,23 +69,9 @@ export function CodeCard() {
     setCollapsedSections(next);
   };
 
-  const expandAll = () => setCollapsedSections(new Set());
-  const collapseAll = () => setCollapsedSections(new Set(file.sections.map((_, i) => i)));
-
   return (
     <div
-      style={{
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        background: 'rgba(0, 0, 0, 0.5)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: 150,
-      }}
+      style={styles.overlay}
       onClick={() => expandedNodeId.value = null}
       onKeyDown={(e: KeyboardEvent) => {
         if (e.key === 'Tab') {
@@ -68,165 +81,77 @@ export function CodeCard() {
         }
       }}
     >
-    <div
-      style={{
-        width: '85vw',
-        maxWidth: '1100px',
-        maxHeight: '85vh',
-        background: '#161b22',
-        border: '2px solid #58a6ff',
-        borderRadius: '8px',
-        boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
-        display: 'flex',
-        flexDirection: 'column',
-        overflow: 'hidden',
-      }}
-      onClick={(e) => e.stopPropagation()}
-    >
-      {/* Header */}
-      <div style={{
-        padding: '10px 14px',
-        background: '#1c2128',
-        borderBottom: '1px solid #30363d',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '8px',
-        flexShrink: 0,
-      }}>
-        <span style={{ fontWeight: 600, fontSize: '13px', color: '#f0f6fc', flex: 1 }}>
-          {file.fileName}
-        </span>
-
-        {file.isNew && (
-          <span style={{ background: '#238636', color: '#fff', fontSize: '10px', padding: '1px 6px', borderRadius: '8px', fontWeight: 600 }}>
-            NEW
+      <div
+        style={styles.cardContainer}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div style={styles.cardHeader}>
+          <span style={styles.fileName}>
+            {file.fileName}
           </span>
-        )}
 
-        {file.isChanged && (file.additions > 0 || file.deletions > 0) && (
-          <span style={{ fontSize: '12px', fontWeight: 600 }}>
-            <span style={{ color: '#3fb950' }}>+{file.additions}</span>
-            {' '}
-            <span style={{ color: '#f85149' }}>-{file.deletions}</span>
-          </span>
-        )}
+          {file.isNew && (
+            <span style={styles.newBadge}>
+              NEW
+            </span>
+          )}
 
-        {/* Expand All / Collapse All buttons */}
-        {file.sections.length > 1 && (
-          <>
-            <button
-              onClick={expandAll}
-              style={{
-                background: '#21262d',
-                border: '1px solid #30363d',
-                color: '#8b949e',
-                padding: '2px 6px',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                fontSize: '10px',
-              }}
-            >
-              Expand All
-            </button>
-            <button
-              onClick={collapseAll}
-              style={{
-                background: '#21262d',
-                border: '1px solid #30363d',
-                color: '#8b949e',
-                padding: '2px 6px',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                fontSize: '10px',
-              }}
-            >
-              Collapse All
-            </button>
-          </>
-        )}
+          {file.isChanged && (file.additions > 0 || file.deletions > 0) && (
+            <span style={styles.diffStats}>
+              <span style={styles.additionsText}>+{file.additions}</span>
+              {' '}
+              <span style={styles.deletionsText}>-{file.deletions}</span>
+            </span>
+          )}
 
-        {/* Review status button */}
-        <button
-          onClick={() => cycleReviewStatus(file.filePath)}
-          style={{
-            background: reviewStatus === 'reviewed' ? '#238636'
-              : reviewStatus === 'flagged' ? '#da3633'
-              : reviewStatus === 'needs-attention' ? '#9e6a03'
-              : '#21262d',
-            border: '1px solid #30363d',
-            color: '#fff',
-            padding: '2px 8px',
-            borderRadius: '4px',
-            cursor: 'pointer',
-            fontSize: '11px',
-          }}
-        >
-          {reviewStatus === 'unreviewed' ? 'Mark Reviewed'
-           : reviewStatus === 'reviewed' ? 'Reviewed'
-           : reviewStatus === 'flagged' ? 'Flagged'
-           : 'Attention'}
-        </button>
-
-        {/* Close button */}
-        <button
-          onClick={() => expandedNodeId.value = null}
-          style={{
-            background: 'transparent',
-            border: 'none',
-            color: '#8b949e',
-            cursor: 'pointer',
-            fontSize: '16px',
-            padding: '0 4px',
-            lineHeight: 1,
-          }}
-        >
-          x
-        </button>
-      </div>
-
-      {/* File path */}
-      <div style={{
-        padding: '4px 14px',
-        fontSize: '10px',
-        color: '#6e7681',
-        background: '#161b22',
-        borderBottom: '1px solid #21262d',
-        flexShrink: 0,
-      }}>
-        {file.filePath}
-      </div>
-
-      {/* Code content */}
-      <div style={{
-        flex: 1,
-        overflowY: 'auto',
-        overflowX: 'auto',
-        padding: '4px 0',
-        fontFamily: '"SF Mono", "Fira Code", "Cascadia Code", Consolas, monospace',
-        fontSize: '12px',
-        lineHeight: '18px',
-      }}>
-        {file.sections.length > 0 ? (
-          file.sections.map((section, si) => (
+          {file.sections.length > 1 && (
             <>
-              {si > 0 && <HiddenLinesBar prevSection={file.sections[si - 1]} nextSection={section} />}
-              <CodeSection
-                key={si}
-                section={section}
-                sectionIndex={si}
-                fileType={file.fileType || 'other'}
-                collapsed={collapsedSections.has(si)}
-                onToggle={() => toggleSection(si)}
-              />
+              <SmallButton onClick={() => setCollapsedSections(new Set())}>Expand All</SmallButton>
+              <SmallButton onClick={() => setCollapsedSections(new Set(file.sections.map((_, i) => i)))}>Collapse All</SmallButton>
             </>
-          ))
-        ) : (
-          <div style={{ padding: '16px', color: '#484f58', fontSize: '12px', textAlign: 'center' }}>
-            No diff sections (unchanged dependency)
-          </div>
-        )}
+          )}
+
+          <button
+            onClick={() => cycleReviewStatus(file.filePath)}
+            style={getReviewStatusButtonStyle(reviewStatus)}
+          >
+            {reviewStatusLabel[reviewStatus]}
+          </button>
+
+          <button
+            onClick={() => expandedNodeId.value = null}
+            style={styles.closeButton}
+          >
+            x
+          </button>
+        </div>
+
+        <div style={styles.filePath}>
+          {file.filePath}
+        </div>
+
+        <div style={styles.codeContainer}>
+          {file.sections.length > 0 ? (
+            file.sections.map((section, si) => (
+              <>
+                {si > 0 && <HiddenLinesBar prevSection={file.sections[si - 1]} nextSection={section} />}
+                <CodeSection
+                  key={si}
+                  section={section}
+                  sectionIndex={si}
+                  fileType={file.fileType || 'other'}
+                  collapsed={collapsedSections.has(si)}
+                  onToggle={() => toggleSection(si)}
+                />
+              </>
+            ))
+          ) : (
+            <div style={styles.noDiffMessage}>
+              No diff sections (unchanged dependency)
+            </div>
+          )}
+        </div>
       </div>
-    </div>
     </div>
   );
 }
@@ -246,17 +171,7 @@ function HiddenLinesBar({ prevSection, nextSection }: { prevSection: MrCodeSecti
   if (hiddenCount <= 0) return null;
 
   return (
-    <div style={{
-      padding: '3px 0',
-      textAlign: 'center',
-      fontSize: '11px',
-      color: '#484f58',
-      background: '#0d1117',
-      borderTop: '1px solid #21262d',
-      borderBottom: '1px solid #21262d',
-      fontFamily: '"SF Mono", "Fira Code", Consolas, monospace',
-      userSelect: 'none',
-    }}>
+    <div style={styles.hiddenLinesBar}>
       {'··· '}{hiddenCount}{' lines hidden ···'}
     </div>
   );
@@ -269,46 +184,181 @@ function CodeSection({ section, sectionIndex, fileType, collapsed, onToggle }: {
   collapsed: boolean;
   onToggle: () => void;
 }) {
-  const lineCount = section.lines.length;
-
   return (
     <div>
-      {/* Clickable hunk header */}
       <div
         onClick={onToggle}
-        style={{
-          padding: '3px 12px',
-          background: collapsed ? '#1c2128' : '#161b22',
-          color: '#8b949e',
-          fontSize: '11px',
-          fontFamily: '"SF Mono", "Fira Code", Consolas, monospace',
-          borderTop: sectionIndex > 0 ? '1px solid #21262d' : 'none',
-          cursor: 'pointer',
-          userSelect: 'none',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '6px',
-        }}
-        onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = '#1c2128'; }}
-        onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = collapsed ? '#1c2128' : '#161b22'; }}
+        style={getSectionHeaderStyle(collapsed, sectionIndex)}
+        onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = colors.bg.secondary; }}
+        onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = collapsed ? colors.bg.secondary : colors.bg.primary; }}
       >
-        <span style={{ fontSize: '10px', color: '#58a6ff', width: '12px', flexShrink: 0 }}>
+        <span style={styles.sectionArrow}>
           {collapsed ? '\u25B6' : '\u25BC'}
         </span>
-        <span style={{ color: '#484f58', fontStyle: 'italic', flex: 1 }}>
+        <span style={styles.sectionLabel}>
           {section.header || `Section ${sectionIndex + 1}`}
         </span>
         {collapsed && (
-          <span style={{ color: '#484f58', fontSize: '10px' }}>
-            {lineCount} lines
+          <span style={styles.sectionLineCount}>
+            {section.lines.length} lines
           </span>
         )}
       </div>
 
-      {/* Lines (visible when expanded) */}
       {!collapsed && section.lines.map((line, li) => (
         <CodeLine key={li} lineNum={line.lineNum} text={line.text} diffType={line.diffType} language={fileType} />
       ))}
     </div>
   );
 }
+
+const getReviewStatusButtonStyle = (reviewStatus: ReviewStatus): JSX.CSSProperties => ({
+  background: reviewStatusBg[reviewStatus],
+  border: `1px solid ${colors.border.default}`,
+  color: '#fff',
+  padding: '2px 8px',
+  borderRadius: '4px',
+  cursor: 'pointer',
+  fontSize: '11px',
+});
+
+const getSectionHeaderStyle = (collapsed: boolean, sectionIndex: number): JSX.CSSProperties => ({
+  padding: '3px 12px',
+  background: collapsed ? colors.bg.secondary : colors.bg.primary,
+  color: colors.text.tertiary,
+  fontSize: '11px',
+  fontFamily: '"SF Mono", "Fira Code", Consolas, monospace',
+  borderTop: sectionIndex > 0 ? `1px solid ${colors.border.subtle}` : 'none',
+  cursor: 'pointer',
+  userSelect: 'none',
+  display: 'flex',
+  alignItems: 'center',
+  gap: '6px',
+});
+
+const styles = {
+  overlay: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    background: colors.bg.overlay,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 150,
+  },
+  cardContainer: {
+    width: '85vw',
+    maxWidth: '1100px',
+    maxHeight: '85vh',
+    background: colors.bg.primary,
+    border: `2px solid ${colors.node.changed}`,
+    borderRadius: '8px',
+    boxShadow: colors.tooltip.shadow,
+    display: 'flex',
+    flexDirection: 'column',
+    overflow: 'hidden',
+  },
+  cardHeader: {
+    padding: '10px 14px',
+    background: colors.bg.secondary,
+    borderBottom: `1px solid ${colors.border.default}`,
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    flexShrink: 0,
+  },
+  fileName: {
+    fontWeight: 600,
+    fontSize: '13px',
+    color: colors.text.primary,
+    flex: 1,
+  },
+  newBadge: {
+    background: colors.review.reviewedBg,
+    color: '#fff',
+    fontSize: '10px',
+    padding: '1px 6px',
+    borderRadius: '8px',
+    fontWeight: 600,
+  },
+  diffStats: {
+    fontSize: '12px',
+    fontWeight: 600,
+  },
+  additionsText: {
+    color: colors.diff.addText,
+  },
+  deletionsText: {
+    color: colors.diff.removeText,
+  },
+  smallButton: {
+    background: colors.bg.tertiary,
+    border: `1px solid ${colors.border.default}`,
+    color: colors.text.tertiary,
+    padding: '2px 6px',
+    borderRadius: '4px',
+    cursor: 'pointer',
+    fontSize: '10px',
+  },
+  closeButton: {
+    background: 'transparent',
+    border: 'none',
+    color: colors.text.tertiary,
+    cursor: 'pointer',
+    fontSize: '16px',
+    padding: '0 4px',
+    lineHeight: 1,
+  },
+  filePath: {
+    padding: '4px 14px',
+    fontSize: '10px',
+    color: colors.text.faint,
+    background: colors.bg.primary,
+    borderBottom: `1px solid ${colors.border.subtle}`,
+    flexShrink: 0,
+  },
+  codeContainer: {
+    flex: 1,
+    overflowY: 'auto',
+    overflowX: 'auto',
+    padding: '4px 0',
+    fontFamily: '"SF Mono", "Fira Code", "Cascadia Code", Consolas, monospace',
+    fontSize: '12px',
+    lineHeight: '18px',
+  },
+  noDiffMessage: {
+    padding: '16px',
+    color: colors.text.muted,
+    fontSize: '12px',
+    textAlign: 'center',
+  },
+  hiddenLinesBar: {
+    padding: '3px 0',
+    textAlign: 'center',
+    fontSize: '11px',
+    color: colors.text.muted,
+    background: colors.bg.canvas,
+    borderTop: `1px solid ${colors.border.subtle}`,
+    borderBottom: `1px solid ${colors.border.subtle}`,
+    fontFamily: '"SF Mono", "Fira Code", Consolas, monospace',
+    userSelect: 'none',
+  },
+  sectionArrow: {
+    fontSize: '10px',
+    color: colors.node.changed,
+    width: '12px',
+    flexShrink: 0,
+  },
+  sectionLabel: {
+    color: colors.text.muted,
+    fontStyle: 'italic',
+    flex: 1,
+  },
+  sectionLineCount: {
+    color: colors.text.muted,
+    fontSize: '10px',
+  },
+} as const satisfies Record<string, JSX.CSSProperties>;

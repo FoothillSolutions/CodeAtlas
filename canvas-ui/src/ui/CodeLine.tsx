@@ -1,4 +1,5 @@
 import { tokenizeLine } from '../syntax/highlighter';
+import { colors } from '../theme/tokens';
 
 interface CodeLineProps {
   lineNum: number;
@@ -19,8 +20,8 @@ export function CodeLine({ lineNum, text, diffType, language }: CodeLineProps) {
         padding: '0 4px 0 4px',
         minHeight: '18px',
         alignItems: 'center',
-        background: isAdd ? 'rgba(46,160,67,0.12)'
-          : isRemove ? 'rgba(248,81,73,0.12)'
+        background: isAdd ? colors.diff.addBgSubtle
+          : isRemove ? colors.diff.removeBgSubtle
           : 'transparent',
       }}
     >
@@ -29,7 +30,7 @@ export function CodeLine({ lineNum, text, diffType, language }: CodeLineProps) {
         width: '16px',
         flexShrink: 0,
         textAlign: 'center',
-        color: isAdd ? '#3fb950' : isRemove ? '#f85149' : 'transparent',
+        color: isAdd ? colors.diff.addText : isRemove ? colors.diff.removeText : 'transparent',
         fontSize: '11px',
         userSelect: 'none',
       }}>
@@ -42,7 +43,7 @@ export function CodeLine({ lineNum, text, diffType, language }: CodeLineProps) {
         flexShrink: 0,
         textAlign: 'right',
         paddingRight: '8px',
-        color: '#484f58',
+        color: colors.text.muted,
         userSelect: 'none',
         fontSize: '11px',
       }}>

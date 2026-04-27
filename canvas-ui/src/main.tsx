@@ -3,8 +3,8 @@ import type { MrGraph } from './types';
 import { initGraph } from './state/graph-store';
 import { loadReviewState } from './state/review-store';
 import { App } from './ui/App';
+import { ErrorBoundary } from './ui/ErrorBoundary';
 
-// Read graph data from embedded JSON
 const dataEl = document.getElementById('graph-data');
 if (dataEl?.textContent) {
   try {
@@ -16,4 +16,9 @@ if (dataEl?.textContent) {
   }
 }
 
-render(<App />, document.getElementById('app')!);
+render(
+  <ErrorBoundary>
+    <App />
+  </ErrorBoundary>,
+  document.getElementById('app')!
+);

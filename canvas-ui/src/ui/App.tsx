@@ -1,40 +1,31 @@
 import { useRef, useEffect } from 'preact/hooks';
-import { computed } from '@preact/signals';
-import { graphData, nodePositions, setNodePositions, setArrowRoutes, setProjectGroups } from '../state/graph-store';
-import { zoom, panX, panY, expandedNodeId, hoveredEdgeIndex } from '../state/ui-store';
+import type { JSX } from 'preact';
+import { effect } from '@preact/signals';
+import { graphData, nodePositions, relayout, relayoutArch, archLayout } from '../state/graph-store';
+import { zoom, panX, panY, lodPinMode, viewMode, expandedProjects } from '../state/ui-store';
 import { initCanvas, destroyCanvas } from '../canvas/canvas-renderer';
 import { setupInteraction, cleanupInteraction } from '../canvas/interaction';
-import { computeLayout } from '../layout/dagre-layout';
-import { routeArrows } from '../layout/arrow-router';
 import { Toolbar } from './Toolbar';
 import { EdgeTooltip } from './EdgeTooltip';
 import { CodeCard } from './CodeCard';
+import { CardOverlay } from './CardOverlay';
 import { KeyboardShortcuts } from './KeyboardShortcuts';
+import { ChatPanel } from './ChatPanel';
+import { colors } from '../theme/tokens';
 
-// Run layout when graph data is available
-const layoutReady = computed(() => {
+const disposeLayoutEffect = effect(() => {
   const data = graphData.value;
-  if (!data || data.files.length === 0) return false;
+  if (!data || data.files.length === 0) return;
+  relayout(data);
+});
 
-  const config = data.config;
-  const result = computeLayout(data, config?.nodeWidth ?? 520, config?.rankDirection ?? 'LR');
-  setNodePositions(result.positions);
-  setProjectGroups(result.groups);
-
-  // Route arrows after layout
-  const routes = routeArrows(data.edges, result.positions);
-  setArrowRoutes(routes.map((r, i) => ({
-    edgeId: `edge-${i}`,
-    waypoints: r.waypoints,
-    fromFileId: r.edge.fromFileId,
-    toFileId: r.edge.toFileId,
-    type: r.edge.type,
-    interfaceName: r.edge.interfaceName,
-    paramName: r.edge.paramName,
-    methodCalls: r.edge.methodCalls,
-  })));
-
-  return true;
+const disposeArchLayoutEffect = effect(() => {
+  const data = graphData.value;
+  if (!data || data.files.length === 0) return;
+  const mode = viewMode.value;
+  if (mode !== 'arch') return;
+  const expanded = expandedProjects.value;
+  relayoutArch(data, expanded);
 });
 
 export function App() {
@@ -45,15 +36,13 @@ export function App() {
       initCanvas(canvasRef.current);
       setupInteraction(canvasRef.current);
 
-      // Apply default zoom from config
       const config = graphData.value?.config;
       if (config?.defaultZoom) {
         zoom.value = config.defaultZoom;
       }
 
-      // Fit all after initial layout
       requestAnimationFrame(() => {
-        if (layoutReady.value) {
+        if (nodePositions.value.size > 0) {
           fitAll(canvasRef.current!);
         }
       });
@@ -65,39 +54,48 @@ export function App() {
   }, []);
 
   return (
-    <div style={{ width: '100vw', height: '100vh', overflow: 'hidden', background: '#0d1117' }}>
+    <div style={styles.appContainer}>
       <Toolbar onFitAll={() => canvasRef.current && fitAll(canvasRef.current)} />
       <canvas
         ref={canvasRef}
-        style={{
-          position: 'absolute',
-          top: '44px',
-          left: 0,
-          right: 0,
-          bottom: 0,
-          width: '100%',
-          height: 'calc(100vh - 44px)',
-          cursor: 'grab',
-        }}
+        style={styles.canvas}
       />
       <EdgeTooltip />
+      <CardOverlay />
       <CodeCard />
       <KeyboardShortcuts onFitAll={() => canvasRef.current && fitAll(canvasRef.current)} />
+      <ChatPanel />
+      {lodPinMode.value !== 'auto' && (
+        <div style={styles.lodIndicator}>
+          LOD: {lodPinMode.value}
+        </div>
+      )}
     </div>
   );
 }
 
 function fitAll(canvas: HTMLCanvasElement) {
-  const positions = nodePositions.value;
-  if (positions.size === 0) return;
-
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  positions.forEach(pos => {
-    minX = Math.min(minX, pos.x);
-    minY = Math.min(minY, pos.y);
-    maxX = Math.max(maxX, pos.x + pos.width);
-    maxY = Math.max(maxY, pos.y + pos.height);
-  });
+
+  if (viewMode.value === 'arch') {
+    const layout = archLayout.value;
+    if (!layout || layout.projectPositions.size === 0) return;
+    layout.projectPositions.forEach(pos => {
+      minX = Math.min(minX, pos.x);
+      minY = Math.min(minY, pos.y);
+      maxX = Math.max(maxX, pos.x + pos.width);
+      maxY = Math.max(maxY, pos.y + pos.height);
+    });
+  } else {
+    const positions = nodePositions.value;
+    if (positions.size === 0) return;
+    positions.forEach(pos => {
+      minX = Math.min(minX, pos.x);
+      minY = Math.min(minY, pos.y);
+      maxX = Math.max(maxX, pos.x + pos.width);
+      maxY = Math.max(maxY, pos.y + pos.height);
+    });
+  }
 
   const padding = 80;
   const graphW = maxX - minX + padding * 2;
@@ -110,3 +108,35 @@ function fitAll(canvas: HTMLCanvasElement) {
   panX.value = (canvasW - graphW * newZoom) / 2 - minX * newZoom + padding * newZoom;
   panY.value = (canvasH - graphH * newZoom) / 2 - minY * newZoom + padding * newZoom;
 }
+
+const styles = {
+  appContainer: {
+    width: '100vw',
+    height: '100vh',
+    overflow: 'hidden',
+    background: '#0d1117',
+  },
+  canvas: {
+    position: 'absolute',
+    top: '44px',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    width: '100%',
+    height: 'calc(100vh - 44px)',
+    cursor: 'grab',
+  },
+  lodIndicator: {
+    position: 'fixed',
+    bottom: '12px',
+    left: '12px',
+    background: colors.bg.secondary,
+    border: `1px solid ${colors.border.default}`,
+    borderRadius: '6px',
+    padding: '4px 10px',
+    fontSize: '12px',
+    color: colors.text.tertiary,
+    pointerEvents: 'none',
+    zIndex: 100,
+  },
+} as const satisfies Record<string, JSX.CSSProperties>;

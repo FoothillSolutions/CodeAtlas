@@ -1,5 +1,7 @@
 import dagre from '@dagrejs/dagre';
 import type { MrGraph, MrFileNode, MrEdge } from '../types';
+import { getChangedLines } from '../utils/diff-utils';
+import { dimensions } from '../theme/tokens';
 
 export interface NodePosition {
   x: number;
@@ -34,8 +36,8 @@ export function computeLayout(
     return { positions, groups, graphWidth: 0, graphHeight: 0 };
   }
 
-  const groupPadding = 30;
-  const groupLabelHeight = 28;
+  const groupPadding = dimensions.groupPadding;
+  const groupLabelHeight = dimensions.groupLabelHeight;
 
   // ── Step 0: Group files by project, build lookup ───────────────────
 
@@ -98,9 +100,9 @@ export function computeLayout(
     const g = new dagre.graphlib.Graph();
     g.setGraph({
       rankdir: rankDirection,
-      nodesep: 40,
-      ranksep: 60,
-      edgesep: 15,
+      nodesep: dimensions.intraNodesep,
+      ranksep: dimensions.intraRanksep,
+      edgesep: dimensions.intraEdgesep,
       marginx: 0,
       marginy: 0,
     });
@@ -117,10 +119,10 @@ export function computeLayout(
 
     dagre.layout(g);
 
-    // Extract positions and normalize to (0,0) origin
+    // Extract positions, normalize to (0,0) origin
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    const rawPositions = new Map<string, NodePosition>();
 
+    const rawPositions = new Map<string, NodePosition>();
     for (const nodeId of g.nodes()) {
       const node = g.node(nodeId);
       if (!node) continue;
@@ -137,16 +139,12 @@ export function computeLayout(
       maxY = Math.max(maxY, pos.y + pos.height);
     }
 
-    // Normalize to (0,0) origin
-    const localPositions = new Map<string, NodePosition>();
-    for (const [id, pos] of rawPositions) {
-      localPositions.set(id, {
-        x: pos.x - minX,
-        y: pos.y - minY,
-        width: pos.width,
-        height: pos.height,
-      });
-    }
+    const localPositions = new Map<string, NodePosition>(
+      Array.from(rawPositions).map(([id, pos]) => [
+        id,
+        { ...pos, x: pos.x - minX, y: pos.y - minY },
+      ])
+    );
 
     internalLayouts.push({
       name: projName,
@@ -161,10 +159,10 @@ export function computeLayout(
   const groupGraph = new dagre.graphlib.Graph();
   groupGraph.setGraph({
     rankdir: rankDirection,
-    nodesep: 80,
-    ranksep: 250,
-    marginx: 50,
-    marginy: 50,
+    nodesep: dimensions.interNodesep,
+    ranksep: dimensions.interRanksep,
+    marginx: dimensions.interMargin,
+    marginy: dimensions.interMargin,
   });
   groupGraph.setDefaultEdgeLabel(() => ({}));
 
@@ -225,6 +223,15 @@ export function computeLayout(
     });
   }
 
+  resolveContainerOverlaps(groups, positions, fileToProject, dimensions.containerMinGap);
+
+  graphWidth = 0;
+  graphHeight = 0;
+  for (const pos of positions.values()) {
+    graphWidth = Math.max(graphWidth, pos.x + pos.width);
+    graphHeight = Math.max(graphHeight, pos.y + pos.height);
+  }
+
   return { positions, groups, graphWidth: graphWidth + 50, graphHeight: graphHeight + 50 };
 }
 
@@ -232,20 +239,93 @@ export function computeLayout(
  * Estimate the rendered height of a node based on its content.
  * This is used for dagre layout — the actual canvas painting may differ slightly.
  */
+function resolveContainerOverlaps(
+  groups: LayoutResult['groups'],
+  positions: Map<string, NodePosition>,
+  fileToProject: Map<string, string>,
+  minGap: number
+) {
+  if (groups.length < 2) return;
+
+  const MAX_ITERATIONS = 5;
+
+  for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
+    let worstOverlap = 0;
+    let worstI = -1;
+    let worstJ = -1;
+
+    for (let i = 0; i < groups.length; i++) {
+      for (let j = i + 1; j < groups.length; j++) {
+        const a = groups[i];
+        const b = groups[j];
+
+        const overlapX = Math.min(a.x + a.width + minGap, b.x + b.width + minGap) - Math.max(a.x, b.x);
+        const overlapY = Math.min(a.y + a.height + minGap, b.y + b.height + minGap) - Math.max(a.y, b.y);
+
+        if (overlapX > 0 && overlapY > 0) {
+          const area = overlapX * overlapY;
+          if (area > worstOverlap) {
+            worstOverlap = area;
+            worstI = i;
+            worstJ = j;
+          }
+        }
+      }
+    }
+
+    if (worstI === -1) break;
+
+    const a = groups[worstI];
+    const b = groups[worstJ];
+
+    const overlapX = Math.min(a.x + a.width + minGap, b.x + b.width + minGap) - Math.max(a.x, b.x);
+    const overlapY = Math.min(a.y + a.height + minGap, b.y + b.height + minGap) - Math.max(a.y, b.y);
+
+    if (overlapX < overlapY) {
+      const shift = overlapX / 2;
+      const sign = a.x < b.x ? 1 : -1;
+      moveGroup(b, positions, fileToProject, sign * shift, 0);
+      moveGroup(a, positions, fileToProject, -sign * shift, 0);
+    } else {
+      const shift = overlapY / 2;
+      const sign = a.y < b.y ? 1 : -1;
+      moveGroup(b, positions, fileToProject, 0, sign * shift);
+      moveGroup(a, positions, fileToProject, 0, -sign * shift);
+    }
+  }
+}
+
+function moveGroup(
+  group: LayoutResult['groups'][0],
+  positions: Map<string, NodePosition>,
+  fileToProject: Map<string, string>,
+  dx: number,
+  dy: number
+) {
+  group.x += dx;
+  group.y += dy;
+
+  for (const [fileId, pos] of positions) {
+    if (fileToProject.get(fileId) === group.name) {
+      pos.x += dx;
+      pos.y += dy;
+    }
+  }
+}
+
 function estimateNodeHeight(file: MrFileNode): number {
-  const headerHeight = 36;
-  const lineHeight = 16;
-  const maxPreviewLines = 8;
+  const headerHeight = dimensions.headerHeight;
+  const lineHeight = dimensions.lineHeight;
+  const maxPreviewLines = dimensions.maxPreviewLines;
 
   if (!file.sections || file.sections.length === 0) {
     return headerHeight + 60;
   }
 
-  let totalLines = 0;
-  for (const section of file.sections) {
-    totalLines += section.lines.length;
+  const visibleLines = getChangedLines(file);
+  if (visibleLines.length === 0) {
+    return headerHeight + 40;
   }
 
-  const visibleLines = Math.min(totalLines, maxPreviewLines);
-  return headerHeight + visibleLines * lineHeight + 12;
+  return headerHeight + visibleLines.length * lineHeight + 12;
 }

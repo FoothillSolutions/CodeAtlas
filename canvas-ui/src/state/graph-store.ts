@@ -1,6 +1,10 @@
 import { signal, computed } from '@preact/signals';
 import type { MrGraph, MrFileNode, MrEdge } from '../types';
 import { routeArrows } from '../layout/arrow-router';
+import { computeLayout } from '../layout/dagre-layout';
+import { flattenRouteToPoly } from '../canvas/arrow-painter';
+import { computeArchLayout, type ArchLayoutResult } from '../layout/arch-layout';
+import { expandedProjects, initExpandedProjects } from '../state/ui-store';
 
 export interface NodePosition {
   x: number;
@@ -12,6 +16,7 @@ export interface NodePosition {
 export interface ArrowRoute {
   edgeId: string;
   waypoints: { x: number; y: number }[];
+  hitPoly: { x: number; y: number }[];
   fromFileId: string;
   toFileId: string;
   type: string; // "di" | "calls" | "di-ghost"
@@ -40,6 +45,9 @@ export const nodePositions = signal<Map<string, NodePosition>>(new Map());
 // Computed arrow routes (set by arrow router)
 export const arrowRoutes = signal<ArrowRoute[]>([]);
 
+// Architecture view layout result
+export const archLayout = signal<ArchLayoutResult | null>(null);
+
 // Derived: all files
 export const files = computed(() => graphData.value?.files ?? []);
 
@@ -54,6 +62,7 @@ export const ghostFiles = computed(() => files.value.filter(f => !f.isChanged));
 
 // Derived: branch name
 export const branchName = computed(() => graphData.value?.branchName ?? '');
+export const repoName = computed(() => graphData.value?.repoName ?? '');
 
 // Derived: stats
 export const stats = computed(() => ({
@@ -62,6 +71,55 @@ export const stats = computed(() => ({
   totalDeletions: graphData.value?.totalDeletions ?? 0,
   analyzedFiles: files.value.length,
 }));
+
+// ── Glyph data for LOD tier ────────────────────────────────────────────
+
+export type GlyphCategory = 'import' | 'class' | 'method' | 'property' | 'comment' | 'other';
+
+export interface GlyphLine {
+  category: GlyphCategory;
+  diffType: string;
+  length: number;
+}
+
+const GLYPH_PATTERNS: [RegExp, GlyphCategory][] = [
+  [/^\s*(using |import |from |require\()/, 'import'],
+  [/^\s*(public |private |protected |internal )?\s*(class |interface |struct |enum |record |abstract )/, 'class'],
+  [/^\s*(public |private |protected |internal |static |async |override |virtual )*(void |Task|string|int|bool|var |[A-Z]\w*\s)\s*\w+\s*[(<]/, 'method'],
+  [/^\s*(public |private |protected |internal |static |readonly )*(get |set |\w+\s+(=>|{))/, 'property'],
+  [/^\s*(\/\/|\/\*|\*|#)/, 'comment'],
+];
+
+function classifyLine(text: string): GlyphCategory {
+  for (const [pattern, category] of GLYPH_PATTERNS) {
+    if (pattern.test(text)) return category;
+  }
+  return 'other';
+}
+
+function computeGlyphsForFile(file: MrFileNode): GlyphLine[] {
+  const result: GlyphLine[] = [];
+  for (const section of file.sections) {
+    for (const line of section.lines) {
+      result.push({
+        category: classifyLine(line.text),
+        diffType: line.diffType,
+        length: line.text.length,
+      });
+    }
+  }
+  return result;
+}
+
+// Cached glyph data per file — computed once when graph data changes
+export const glyphDataMap = computed<Map<string, GlyphLine[]>>(() => {
+  const allFiles = files.value;
+  const map = new Map<string, GlyphLine[]>();
+  for (const file of allFiles) {
+    map.set(file.id, computeGlyphsForFile(file));
+  }
+  return map;
+});
 
 // Initialize from JSON data
 export function initGraph(data: MrGraph) {
@@ -97,11 +155,31 @@ export function setProjectGroups(groups: ProjectGroup[]) {
 export function rerouteArrows() {
   const data = graphData.value;
   if (!data) return;
-  const positions = nodePositions.value;
-  const routes = routeArrows(data.edges, positions);
-  arrowRoutes.value = routes.map((r, i) => ({
+  arrowRoutes.value = buildArrowRoutes(data.edges, nodePositions.value);
+}
+
+export function relayout(data: MrGraph) {
+  const config = data.config;
+  const nw = config?.nodeWidth ?? 520;
+  const rd = config?.rankDirection ?? 'LR';
+
+  const result = computeLayout(data, nw, rd);
+
+  nodePositions.value = result.positions;
+  projectGroups.value = result.groups;
+  arrowRoutes.value = buildArrowRoutes(data.edges, result.positions);
+
+  return result;
+}
+
+function buildArrowRoutes(
+  edges: MrGraph['edges'],
+  positions: Map<string, NodePosition>,
+): ArrowRoute[] {
+  return routeArrows(edges, positions).map((r, i) => ({
     edgeId: `edge-${i}`,
     waypoints: r.waypoints,
+    hitPoly: flattenRouteToPoly(r.waypoints),
     fromFileId: r.edge.fromFileId,
     toFileId: r.edge.toFileId,
     type: r.edge.type,
@@ -109,4 +187,18 @@ export function rerouteArrows() {
     paramName: r.edge.paramName,
     methodCalls: r.edge.methodCalls,
   }));
+}
+
+let archInitialized = false;
+
+export function relayoutArch(data: MrGraph, expanded: Set<string>) {
+  if (!archInitialized) {
+    archInitialized = true;
+    const allProjects = [...new Set(data.files.map(f => f.projectName || 'Other'))];
+    initExpandedProjects(allProjects);
+    expanded = new Set(allProjects);
+  }
+  const result = computeArchLayout(data, expanded);
+  archLayout.value = result;
+  return result;
 }

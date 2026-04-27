@@ -1,0 +1,9 @@
+{
+  "repos_parent_dir": "/path/to/parent/folder/containing/all/repos",
+  "gitlab_group": "myorg/mygroup",
+  "repo_overrides": {
+    "some-monorepo": {
+      "sln": "/path/to/monorepo/SubDir/Solution.sln"
+    }
+  }
+}
