@@ -1,8 +1,9 @@
 import { useRef, useEffect } from 'preact/hooks';
 import type { JSX } from 'preact';
 import { effect } from '@preact/signals';
-import { graphData, nodePositions, relayout, relayoutArch, archLayout } from '../state/graph-store';
+import { graphData, nodePositions, relayout, relayoutArch, archLayout, relayoutGraph, stopForceSimulation, forceNodes } from '../state/graph-store';
 import { zoom, panX, panY, lodPinMode, viewMode, expandedProjects } from '../state/ui-store';
+import { riskScores } from '../state/analysis-store';
 import { initCanvas, destroyCanvas } from '../canvas/canvas-renderer';
 import { setupInteraction, cleanupInteraction } from '../canvas/interaction';
 import { Toolbar } from './Toolbar';
@@ -11,6 +12,7 @@ import { CodeCard } from './CodeCard';
 import { CardOverlay } from './CardOverlay';
 import { KeyboardShortcuts } from './KeyboardShortcuts';
 import { ChatPanel } from './ChatPanel';
+import { GraphCodePanel } from './GraphCodePanel';
 import { colors } from '../theme/tokens';
 
 const disposeLayoutEffect = effect(() => {
@@ -26,6 +28,17 @@ const disposeArchLayoutEffect = effect(() => {
   if (mode !== 'arch') return;
   const expanded = expandedProjects.value;
   relayoutArch(data, expanded);
+});
+
+const disposeGraphLayoutEffect = effect(() => {
+  const data = graphData.value;
+  if (!data || data.files.length === 0) return;
+  const mode = viewMode.value;
+  if (mode !== 'graph') {
+    stopForceSimulation();
+    return;
+  }
+  relayoutGraph(data, riskScores.value);
 });
 
 export function App() {
@@ -53,6 +66,16 @@ export function App() {
     };
   }, []);
 
+  useEffect(() => {
+    const dispose = effect(() => {
+      viewMode.value;
+      setTimeout(() => {
+        if (canvasRef.current) fitAll(canvasRef.current);
+      }, 300);
+    });
+    return dispose;
+  }, []);
+
   return (
     <div style={styles.appContainer}>
       <Toolbar onFitAll={() => canvasRef.current && fitAll(canvasRef.current)} />
@@ -60,6 +83,7 @@ export function App() {
         ref={canvasRef}
         style={styles.canvas}
       />
+      <GraphCodePanel />
       <EdgeTooltip />
       <CardOverlay />
       <CodeCard />
@@ -77,7 +101,17 @@ export function App() {
 function fitAll(canvas: HTMLCanvasElement) {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
 
-  if (viewMode.value === 'arch') {
+  if (viewMode.value === 'graph') {
+    const nodes = forceNodes.value;
+    if (nodes.length === 0) return;
+    for (const n of nodes) {
+      if (n.x == null || n.y == null) continue;
+      minX = Math.min(minX, n.x - n.radius);
+      minY = Math.min(minY, n.y - n.radius);
+      maxX = Math.max(maxX, n.x + n.radius);
+      maxY = Math.max(maxY, n.y + n.radius);
+    }
+  } else if (viewMode.value === 'arch') {
     const layout = archLayout.value;
     if (!layout || layout.projectPositions.size === 0) return;
     layout.projectPositions.forEach(pos => {

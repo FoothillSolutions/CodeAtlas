@@ -4,11 +4,12 @@ import { colors } from '../theme/tokens';
 interface CodeLineProps {
   lineNum: number;
   text: string;
-  diffType: string; // "context" | "add" | "remove"
+  diffType: string;
   language: string;
+  wrap?: boolean;
 }
 
-export function CodeLine({ lineNum, text, diffType, language }: CodeLineProps) {
+export function CodeLine({ lineNum, text, diffType, language, wrap }: CodeLineProps) {
   const tokens = tokenizeLine(text, language);
   const isAdd = diffType === 'add';
   const isRemove = diffType === 'remove';
@@ -50,9 +51,9 @@ export function CodeLine({ lineNum, text, diffType, language }: CodeLineProps) {
         {lineNum > 0 ? lineNum : ''}
       </span>
 
-      {/* Code text with syntax highlighting -- NO truncation */}
       <span style={{
-        whiteSpace: 'pre',
+        whiteSpace: wrap ? 'pre-wrap' : 'pre',
+        wordBreak: wrap ? 'break-all' : undefined,
         flex: 1,
       }}>
         {tokens.map((tok, i) =>

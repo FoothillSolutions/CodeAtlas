@@ -18,6 +18,8 @@ public class MrGraph
     public CanvasConfig? Config { get; set; }
     public List<MrFileNode> Files { get; } = [];
     public List<MrEdge> Edges { get; } = [];
+    public List<MrClassNode> ClassNodes { get; } = [];
+    public List<MrClassEdge> ClassEdges { get; } = [];
     public int SchemaVersion { get; set; } = 2;
 }
 
@@ -74,5 +76,27 @@ public class MrEdge
     public string InterfaceName { get; set; } = "";
     public string? ParamName { get; set; }
     public string Type { get; set; } = "";
+    public List<string> MethodCalls { get; } = [];
+}
+
+public class MrClassNode
+{
+    public string Id { get; set; } = "";
+    public string ClassName { get; set; } = "";
+    public string? Namespace { get; set; }
+    public string FileId { get; set; } = "";
+    public string ProjectName { get; set; } = "";
+    public bool IsChanged { get; set; } = true;
+    public bool IsInterface { get; set; }
+    public List<string> Interfaces { get; } = [];
+    public List<string> Methods { get; } = [];
+}
+
+public class MrClassEdge
+{
+    public string FromClassId { get; set; } = "";
+    public string ToClassId { get; set; } = "";
+    public string Type { get; set; } = "";
+    public string? InterfaceName { get; set; }
     public List<string> MethodCalls { get; } = [];
 }

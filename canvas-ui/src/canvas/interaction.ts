@@ -3,8 +3,9 @@ import {
   selectedNodeId, expandedNodeId, selectNode, expandNode, hoverNode, hoverEdge, screenToWorld,
   layoutLocked, viewMode, toggleProjectExpanded, expandedProjects
 } from '../state/ui-store';
-import { nodePositions, updateNodePosition, arrowRoutes, rerouteArrows, archLayout } from '../state/graph-store';
+import { nodePositions, updateNodePosition, arrowRoutes, rerouteArrows, archLayout, forceNodes, getActiveSimulation } from '../state/graph-store';
 import { getDPR } from './canvas-renderer';
+import { hitTestGraphNode } from './class-graph-painter';
 import { dimensions } from '../theme/tokens';
 
 let isPanning = false;
@@ -38,6 +39,9 @@ function getCanvasOffset(canvas: HTMLCanvasElement, e: MouseEvent): { x: number;
 }
 
 function hitTestNode(worldX: number, worldY: number): string | null {
+  if (viewMode.value === 'graph') {
+    return hitTestGraphNode(worldX, worldY, forceNodes.value);
+  }
   if (viewMode.value === 'arch') {
     return hitTestArchNode(worldX, worldY);
   }
@@ -127,6 +131,19 @@ function onMouseDown(e: MouseEvent) {
       return;
     }
     selectNode(hitNode);
+    if (viewMode.value === 'graph') {
+      isDragging = true;
+      dragNodeId = hitNode;
+      const node = forceNodes.value.find(n => n.id === hitNode);
+      if (node) {
+        node.fx = node.x;
+        node.fy = node.y;
+        const sim = getActiveSimulation();
+        if (sim) sim.alphaTarget(0.3).restart();
+      }
+      canvas.style.cursor = 'grabbing';
+      return;
+    }
     if (!layoutLocked.value && viewMode.value === 'diff') {
       isDragging = true;
       dragNodeId = hitNode;
@@ -160,6 +177,15 @@ function onMouseMove(e: MouseEvent) {
   }
 
   if (isDragging && dragNodeId) {
+    if (viewMode.value === 'graph') {
+      const node = forceNodes.value.find(n => n.id === dragNodeId);
+      if (node) {
+        node.fx = world.x;
+        node.fy = world.y;
+      }
+      markDirty();
+      return;
+    }
     updateNodePosition(dragNodeId, world.x - dragOffsetX, world.y - dragOffsetY);
     rerouteArrows();
     markDirty();
@@ -183,6 +209,15 @@ function onMouseMove(e: MouseEvent) {
 
 function onMouseUp(e: MouseEvent) {
   const canvas = e.target as HTMLCanvasElement;
+  if (viewMode.value === 'graph' && dragNodeId) {
+    const node = forceNodes.value.find(n => n.id === dragNodeId);
+    if (node) {
+      node.fx = null;
+      node.fy = null;
+    }
+    const sim = getActiveSimulation();
+    if (sim) sim.alphaTarget(0);
+  }
   isPanning = false;
   isDragging = false;
   dragNodeId = null;

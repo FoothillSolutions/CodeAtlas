@@ -4,7 +4,8 @@ import { routeArrows } from '../layout/arrow-router';
 import { computeLayout } from '../layout/dagre-layout';
 import { flattenRouteToPoly } from '../canvas/arrow-painter';
 import { computeArchLayout, type ArchLayoutResult } from '../layout/arch-layout';
-import { expandedProjects, initExpandedProjects } from '../state/ui-store';
+import { expandedProjects, initExpandedProjects, markDirty } from '../state/ui-store';
+import { createForceSimulation, type ForceNode, type ForceLink, type ForceSimulation } from '../layout/force-layout';
 
 export interface NodePosition {
   x: number;
@@ -53,6 +54,10 @@ export const files = computed(() => graphData.value?.files ?? []);
 
 // Derived: all edges
 export const edges = computed(() => graphData.value?.edges ?? []);
+
+// Derived: class nodes and edges
+export const classNodes = computed(() => graphData.value?.classNodes ?? []);
+export const classEdges = computed(() => graphData.value?.classEdges ?? []);
 
 // Derived: changed files only
 export const changedFiles = computed(() => files.value.filter(f => f.isChanged));
@@ -195,10 +200,88 @@ export function relayoutArch(data: MrGraph, expanded: Set<string>) {
   if (!archInitialized) {
     archInitialized = true;
     const allProjects = [...new Set(data.files.map(f => f.projectName || 'Other'))];
-    initExpandedProjects(allProjects);
-    expanded = new Set(allProjects);
+    initExpandedProjects([]);
+    expanded = new Set<string>();
   }
   const result = computeArchLayout(data, expanded);
   archLayout.value = result;
   return result;
+}
+
+// ── Force graph (class relationship) view ──────────────────────
+
+export interface ForceConfig {
+  chargeStrength: number;
+  linkDistance: number;
+  gravityStrength: number;
+  collisionPadding: number;
+}
+
+export const defaultForceConfig: ForceConfig = {
+  chargeStrength: -350,
+  linkDistance: 100,
+  gravityStrength: 0.05,
+  collisionPadding: 4,
+};
+
+export const forceConfig = signal<ForceConfig>({ ...defaultForceConfig });
+export const forceNodes = signal<ForceNode[]>([]);
+export const forceLinks = signal<ForceLink[]>([]);
+
+let activeSimulation: ForceSimulation | null = null;
+
+export function getActiveSimulation(): ForceSimulation | null {
+  return activeSimulation;
+}
+
+export function relayoutGraph(data: MrGraph, riskScores: Map<string, number>) {
+  if (activeSimulation) {
+    activeSimulation.stop();
+    activeSimulation = null;
+  }
+
+  const cn = data.classNodes ?? [];
+  const ce = data.classEdges ?? [];
+  if (cn.length === 0) return;
+
+  const cfg = forceConfig.value;
+  const { simulation, nodes, links } = createForceSimulation(cn, ce, riskScores, 1200, 800, cfg);
+
+  forceNodes.value = nodes;
+  forceLinks.value = links;
+  activeSimulation = simulation;
+
+  simulation.on('tick', () => {
+    forceNodes.value = [...nodes];
+    markDirty();
+  });
+}
+
+export function updateForceConfig(partial: Partial<ForceConfig>) {
+  const cfg = { ...forceConfig.value, ...partial };
+  forceConfig.value = cfg;
+
+  if (!activeSimulation) return;
+
+  const sim = activeSimulation;
+  (sim.force('charge') as ReturnType<typeof import('d3-force').forceManyBody>)
+    ?.strength(cfg.chargeStrength)
+    .distanceMax(400);
+  (sim.force('link') as ReturnType<typeof import('d3-force').forceLink>)
+    ?.distance(cfg.linkDistance);
+  (sim.force('x') as ReturnType<typeof import('d3-force').forceX>)
+    ?.strength(cfg.gravityStrength);
+  (sim.force('y') as ReturnType<typeof import('d3-force').forceY>)
+    ?.strength(cfg.gravityStrength);
+  (sim.force('collision') as ReturnType<typeof import('d3-force').forceCollide<ForceNode>>)
+    ?.radius((d: ForceNode) => d.radius + cfg.collisionPadding);
+
+  sim.alpha(0.5).restart();
+}
+
+export function stopForceSimulation() {
+  if (activeSimulation) {
+    activeSimulation.stop();
+    activeSimulation = null;
+  }
 }

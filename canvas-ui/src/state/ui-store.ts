@@ -2,14 +2,21 @@ import { signal } from '@preact/signals';
 import { dimensions } from '../theme/tokens';
 
 // View modes
-export type ViewMode = 'diff' | 'arch';
+export type ViewMode = 'diff' | 'arch' | 'graph';
 export const viewMode = signal<ViewMode>('diff');
 
 // Architecture view: which projects are expanded
 export const expandedProjects = signal<Set<string>>(new Set());
 
+export function setViewMode(mode: ViewMode) {
+  viewMode.value = mode;
+  markDirty();
+}
+
 export function toggleViewMode() {
-  viewMode.value = viewMode.value === 'diff' ? 'arch' : 'diff';
+  const cycle: ViewMode[] = ['diff', 'arch', 'graph'];
+  const idx = cycle.indexOf(viewMode.value);
+  viewMode.value = cycle[(idx + 1) % cycle.length];
   markDirty();
 }
 

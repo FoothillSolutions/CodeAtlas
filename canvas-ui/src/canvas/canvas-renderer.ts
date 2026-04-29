@@ -1,5 +1,6 @@
 import { effect } from '@preact/signals';
-import { nodePositions, arrowRoutes, files, projectGroups, glyphDataMap, archLayout } from '../state/graph-store';
+import { nodePositions, arrowRoutes, files, projectGroups, glyphDataMap, archLayout, forceNodes, forceLinks } from '../state/graph-store';
+import type { ForceNode } from '../layout/force-layout';
 import type { NodePosition } from '../layout/dagre-layout';
 import type { MrFileNode } from '../types';
 import {
@@ -16,6 +17,7 @@ import { paintArrow } from './arrow-painter';
 import { paintProjectNode, paintArchEdge, paintFileSubNode, paintFolderLabel } from './project-painter';
 import { updateLodFades, paintTier } from './lod-fade-manager';
 import { paintDiffLabels } from './label-painter';
+import { paintGraphEdges, paintGraphNodes } from './class-graph-painter';
 import { colors, dimensions, fonts, fontStrings } from '../theme/tokens';
 
 interface ViewportBounds {
@@ -78,6 +80,8 @@ function startRenderLoop() {
     viewMode.value;
     expandedProjects.value;
     archLayout.value;
+    forceNodes.value;
+    forceLinks.value;
 
     canvasDirty.value = true;
   });
@@ -119,7 +123,9 @@ function render() {
   ctx.translate(panX.value, panY.value);
   ctx.scale(zoom.value, zoom.value);
 
-  if (viewMode.value === 'arch') {
+  if (viewMode.value === 'graph') {
+    renderGraphMode(ctx, width, height, dpr);
+  } else if (viewMode.value === 'arch') {
     renderArchMode(ctx, width, height, dpr);
   } else {
     renderDiffMode(ctx, width, height, dpr);
@@ -130,6 +136,38 @@ function render() {
   if (viewMode.value === 'diff') {
     paintDiffLabels(ctx, width, height, dpr);
   }
+}
+
+function renderGraphMode(
+  ctx: CanvasRenderingContext2D,
+  _canvasWidth: number,
+  _canvasHeight: number,
+  _devicePixelRatio: number,
+) {
+  const nodes = forceNodes.value;
+  const links = forceLinks.value;
+  const selected = selectedNodeId.value;
+  const hovered = hoveredNodeId.value;
+
+  if (nodes.length === 0) return;
+
+  const maxRisk = Math.max(1, ...nodes.map(n => n.riskScore));
+
+  let highlightedIds: Set<string> | null = null;
+  if (selected) {
+    highlightedIds = new Set([selected]);
+    for (const link of links) {
+      const s = (link.source as ForceNode).id ?? (link.source as string);
+      const t = (link.target as ForceNode).id ?? (link.target as string);
+      if (s === selected || t === selected) {
+        highlightedIds.add(s);
+        highlightedIds.add(t);
+      }
+    }
+  }
+
+  paintGraphEdges(ctx, links, maxRisk, highlightedIds);
+  paintGraphNodes(ctx, nodes, maxRisk, selected, hovered, highlightedIds);
 }
 
 function renderArchMode(

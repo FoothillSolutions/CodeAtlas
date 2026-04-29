@@ -1,8 +1,8 @@
 import { useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import type { JSX } from 'preact';
-import { branchName, repoName, stats } from '../state/graph-store';
-import { zoom, setZoom, setPan, activeFilters, markDirty, layoutLocked, activeOverlays, toggleOverlay, viewMode, toggleViewMode, type Overlay } from '../state/ui-store';
+import { branchName, repoName, stats, forceConfig, defaultForceConfig, updateForceConfig } from '../state/graph-store';
+import { zoom, setZoom, setPan, activeFilters, markDirty, layoutLocked, activeOverlays, toggleOverlay, viewMode, setViewMode, type ViewMode as ViewModeType, type Overlay } from '../state/ui-store';
 import { reviewProgress } from '../state/review-store';
 import { shortcuts } from './KeyboardShortcuts';
 import { colors } from '../theme/tokens';
@@ -60,6 +60,7 @@ export function Toolbar({ onFitAll }: ToolbarProps) {
 
       <span style={styles.viewModeContainer}>
         <ViewModeButton mode="diff" label="Diff" />
+        <ViewModeButton mode="graph" label="Graph" />
         <ViewModeButton mode="arch" label="Arch" />
       </span>
 
@@ -69,6 +70,8 @@ export function Toolbar({ onFitAll }: ToolbarProps) {
         <span style={styles.overlaysLabel}>Overlays</span>
         <OverlayToggle overlay="risk-heatmap" label="Risk" />
       </span>
+
+      {viewMode.value === 'graph' && <ForceConfigPanel />}
 
       <div style={styles.toolbarControls}>
         <ToolbarButton
@@ -156,16 +159,98 @@ function OverlayToggle({ overlay, label }: { overlay: Overlay; label: string }) 
   );
 }
 
-function ViewModeButton({ mode, label }: { mode: 'diff' | 'arch'; label: string }) {
+function ViewModeButton({ mode, label }: { mode: ViewModeType; label: string }) {
   const isActive = viewMode.value === mode;
 
   return (
     <button
-      onClick={() => { if (!isActive) toggleViewMode(); }}
+      onClick={() => { if (!isActive) setViewMode(mode); }}
       style={getViewModeButtonStyle(isActive)}
     >
       {label}
     </button>
+  );
+}
+
+function ForceConfigPanel() {
+  const cfg = forceConfig.value;
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div style={styles.forceConfigWrapper}>
+      <button
+        onClick={() => setOpen(!open)}
+        style={getToolbarButtonStyle(open)}
+      >
+        ⚙ Force
+      </button>
+      {open && (
+        <div style={styles.forceConfigPanel}>
+          <div style={styles.forceConfigHeader}>
+            <span>Force Layout</span>
+            <button
+              onClick={() => updateForceConfig({ ...defaultForceConfig })}
+              style={styles.forceConfigReset}
+            >
+              Reset
+            </button>
+          </div>
+          <ForceSlider
+            label="Charge"
+            value={cfg.chargeStrength}
+            min={-400}
+            max={0}
+            step={10}
+            onChange={v => updateForceConfig({ chargeStrength: v })}
+          />
+          <ForceSlider
+            label="Link Dist"
+            value={cfg.linkDistance}
+            min={20}
+            max={300}
+            step={10}
+            onChange={v => updateForceConfig({ linkDistance: v })}
+          />
+          <ForceSlider
+            label="Gravity"
+            value={cfg.gravityStrength}
+            min={0}
+            max={1}
+            step={0.05}
+            onChange={v => updateForceConfig({ gravityStrength: v })}
+          />
+          <ForceSlider
+            label="Padding"
+            value={cfg.collisionPadding}
+            min={0}
+            max={30}
+            step={1}
+            onChange={v => updateForceConfig({ collisionPadding: v })}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ForceSlider({ label, value, min, max, step, onChange }: {
+  label: string; value: number; min: number; max: number; step: number;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <div style={styles.forceSliderRow}>
+      <span style={styles.forceSliderLabel}>{label}</span>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onInput={(e) => onChange(Number((e.target as HTMLInputElement).value))}
+        style={styles.forceSliderInput}
+      />
+      <span style={styles.forceSliderValue}>{value}</span>
+    </div>
   );
 }
 
@@ -406,5 +491,66 @@ const styles = {
   },
   tooltipDescription: {
     color: colors.text.tertiary,
+  },
+  forceConfigWrapper: {
+    position: 'relative',
+  },
+  forceConfigPanel: {
+    position: 'absolute',
+    top: '100%',
+    left: 0,
+    marginTop: '8px',
+    background: colors.bg.secondary,
+    border: `1px solid ${colors.border.default}`,
+    borderRadius: '8px',
+    padding: '12px 16px',
+    zIndex: 200,
+    width: '240px',
+    boxShadow: colors.tooltip.shadow,
+  },
+  forceConfigHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    fontSize: '12px',
+    fontWeight: 600,
+    color: colors.text.primary,
+    marginBottom: '10px',
+    paddingBottom: '6px',
+    borderBottom: `1px solid ${colors.border.default}`,
+  },
+  forceConfigReset: {
+    background: colors.bg.tertiary,
+    border: `1px solid ${colors.border.default}`,
+    borderRadius: '4px',
+    padding: '2px 8px',
+    fontSize: '10px',
+    color: colors.text.tertiary,
+    cursor: 'pointer',
+  },
+  forceSliderRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    marginBottom: '6px',
+  },
+  forceSliderLabel: {
+    fontSize: '11px',
+    color: colors.text.tertiary,
+    width: '55px',
+    flexShrink: 0,
+  },
+  forceSliderInput: {
+    flex: 1,
+    height: '4px',
+    accentColor: colors.selection.activeBorder,
+    cursor: 'pointer',
+  },
+  forceSliderValue: {
+    fontSize: '10px',
+    color: colors.text.muted,
+    width: '40px',
+    textAlign: 'right',
+    fontFamily: 'monospace',
   },
 } as const satisfies Record<string, JSX.CSSProperties>;

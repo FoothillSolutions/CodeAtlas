@@ -150,6 +150,54 @@ public class MrAnalyzer
             }
         }
 
+        foreach (var classSyntax in classes)
+        {
+            if (model.GetDeclaredSymbol(classSyntax) is not INamedTypeSymbol classSymbol) continue;
+
+            var className = classSymbol.Name;
+            var classNode = new MrClassNode
+            {
+                Id          = GraphHelpers.SanitizeId($"{doc.Project.Name}/{className}"),
+                ClassName   = className,
+                Namespace   = nsDecl is not null ? model.GetDeclaredSymbol(nsDecl)?.ToDisplayString() : null,
+                FileId      = node.Id,
+                ProjectName = doc.Project.Name,
+                IsChanged   = true,
+                IsInterface = false
+            };
+
+            foreach (var iface in classSymbol.AllInterfaces)
+                classNode.Interfaces.Add(iface.Name);
+
+            foreach (var method in classSyntax.Members.OfType<MethodDeclarationSyntax>())
+                classNode.Methods.Add(method.Identifier.Text);
+
+            graph.ClassNodes.Add(classNode);
+        }
+
+        foreach (var ifaceSyntax in root.DescendantNodes().OfType<InterfaceDeclarationSyntax>())
+        {
+            var ifaceSymbol = model.GetDeclaredSymbol(ifaceSyntax);
+            if (ifaceSymbol is null) continue;
+
+            var ifaceName = ifaceSymbol.Name;
+            var ifaceNode = new MrClassNode
+            {
+                Id          = GraphHelpers.SanitizeId($"{doc.Project.Name}/{ifaceName}"),
+                ClassName   = ifaceName,
+                Namespace   = nsDecl is not null ? model.GetDeclaredSymbol(nsDecl)?.ToDisplayString() : null,
+                FileId      = node.Id,
+                ProjectName = doc.Project.Name,
+                IsChanged   = true,
+                IsInterface = true
+            };
+
+            foreach (var method in ifaceSyntax.Members.OfType<MethodDeclarationSyntax>())
+                ifaceNode.Methods.Add(method.Identifier.Text);
+
+            graph.ClassNodes.Add(ifaceNode);
+        }
+
         graph.Files.Add(node);
     }
 
@@ -222,6 +270,102 @@ public class MrAnalyzer
         }
 
         await ResolveDependenciesToUnchangedFilesAsync(graph);
+        BuildClassEdges(graph);
+    }
+
+    private static void BuildClassEdges(MrGraph graph)
+    {
+        var classById = graph.ClassNodes.ToDictionary(c => c.Id);
+        var classesByName = graph.ClassNodes.ToLookup(c => c.ClassName);
+        var interfaceImplementors = new Dictionary<string, List<MrClassNode>>();
+
+        foreach (var cn in graph.ClassNodes.Where(c => !c.IsInterface))
+        {
+            foreach (var iface in cn.Interfaces)
+            {
+                if (!interfaceImplementors.ContainsKey(iface))
+                    interfaceImplementors[iface] = [];
+                interfaceImplementors[iface].Add(cn);
+            }
+        }
+
+        foreach (var cn in graph.ClassNodes.Where(c => !c.IsInterface))
+        {
+            var parentFile = graph.Files.FirstOrDefault(f => f.Id == cn.FileId);
+            if (parentFile is null) continue;
+
+            foreach (var dep in parentFile.Dependencies)
+            {
+                var implName = GraphHelpers.StripInterfacePrefix(dep.InterfaceName);
+                var targets = classesByName[implName].Where(t => t.Id != cn.Id).ToList();
+
+                if (targets.Count == 0 && interfaceImplementors.TryGetValue(dep.InterfaceName, out var implementors))
+                    targets = implementors.Where(t => t.Id != cn.Id).ToList();
+
+                foreach (var target in targets)
+                {
+                    graph.ClassEdges.Add(new MrClassEdge
+                    {
+                        FromClassId   = cn.Id,
+                        ToClassId     = target.Id,
+                        Type          = target.IsChanged ? "di" : "di-ghost",
+                        InterfaceName = dep.InterfaceName
+                    });
+                }
+            }
+
+            foreach (var call in parentFile.MethodCalls)
+            {
+                var implName = GraphHelpers.StripInterfacePrefix(call.TargetInterface);
+                var targets = classesByName[implName].Where(t => t.Id != cn.Id).ToList();
+
+                if (targets.Count == 0 && interfaceImplementors.TryGetValue(call.TargetInterface, out var implementors))
+                    targets = implementors.Where(t => t.Id != cn.Id).ToList();
+
+                foreach (var target in targets)
+                {
+                    var label = $"{call.FromMethod}() -> {call.CalledMethod}()";
+                    var existing = graph.ClassEdges.FirstOrDefault(e =>
+                        e.FromClassId == cn.Id && e.ToClassId == target.Id && e.Type == "calls");
+
+                    if (existing is not null)
+                    {
+                        if (!existing.MethodCalls.Contains(label))
+                            existing.MethodCalls.Add(label);
+                    }
+                    else
+                    {
+                        var edge = new MrClassEdge
+                        {
+                            FromClassId   = cn.Id,
+                            ToClassId     = target.Id,
+                            Type          = "calls",
+                            InterfaceName = call.TargetInterface
+                        };
+                        edge.MethodCalls.Add(label);
+                        graph.ClassEdges.Add(edge);
+                    }
+                }
+            }
+
+            foreach (var iface in cn.Interfaces)
+            {
+                var ifaceNodes = graph.ClassNodes
+                    .Where(c => c.IsInterface && c.ClassName == iface)
+                    .ToList();
+
+                foreach (var ifaceNode in ifaceNodes)
+                {
+                    graph.ClassEdges.Add(new MrClassEdge
+                    {
+                        FromClassId   = cn.Id,
+                        ToClassId     = ifaceNode.Id,
+                        Type          = "implements",
+                        InterfaceName = iface
+                    });
+                }
+            }
+        }
     }
 
     private static MrFileNode? FindChangedFileByImplName(string ifaceName, string excludeId, MrGraph graph)
@@ -286,6 +430,8 @@ public class MrAnalyzer
                         FileType    = GraphHelpers.DetectFileType(relativePath),
                         ProjectName = project.Name
                     });
+
+                    ExtractGhostClassNodes(syntaxTree, compilation, ghostId, project.Name, graph);
                 }
 
                 graph.Edges.Add(new MrEdge
@@ -304,6 +450,62 @@ public class MrAnalyzer
         }
 
         return false;
+    }
+
+    private static void ExtractGhostClassNodes(SyntaxTree syntaxTree, Compilation compilation, string ghostFileId, string projectName, MrGraph graph)
+    {
+        var ghostRoot  = syntaxTree.GetRoot();
+        var ghostModel = compilation.GetSemanticModel(syntaxTree);
+        var ghostNs    = ghostRoot.DescendantNodes().OfType<BaseNamespaceDeclarationSyntax>().FirstOrDefault();
+        var nsName     = ghostNs is not null ? ghostModel.GetDeclaredSymbol(ghostNs)?.ToDisplayString() : null;
+
+        foreach (var cls in ghostRoot.DescendantNodes().OfType<ClassDeclarationSyntax>())
+        {
+            if (ghostModel.GetDeclaredSymbol(cls) is not INamedTypeSymbol sym) continue;
+
+            var classNode = new MrClassNode
+            {
+                Id          = GraphHelpers.SanitizeId($"{projectName}/{sym.Name}"),
+                ClassName   = sym.Name,
+                Namespace   = nsName,
+                FileId      = ghostFileId,
+                ProjectName = projectName,
+                IsChanged   = false,
+                IsInterface = false
+            };
+
+            foreach (var iface in sym.AllInterfaces)
+                classNode.Interfaces.Add(iface.Name);
+
+            foreach (var method in cls.Members.OfType<MethodDeclarationSyntax>())
+                classNode.Methods.Add(method.Identifier.Text);
+
+            if (!graph.ClassNodes.Any(c => c.Id == classNode.Id))
+                graph.ClassNodes.Add(classNode);
+        }
+
+        foreach (var iface in ghostRoot.DescendantNodes().OfType<InterfaceDeclarationSyntax>())
+        {
+            var sym = ghostModel.GetDeclaredSymbol(iface);
+            if (sym is null) continue;
+
+            var ifaceNode = new MrClassNode
+            {
+                Id          = GraphHelpers.SanitizeId($"{projectName}/{sym.Name}"),
+                ClassName   = sym.Name,
+                Namespace   = nsName,
+                FileId      = ghostFileId,
+                ProjectName = projectName,
+                IsChanged   = false,
+                IsInterface = true
+            };
+
+            foreach (var method in iface.Members.OfType<MethodDeclarationSyntax>())
+                ifaceNode.Methods.Add(method.Identifier.Text);
+
+            if (!graph.ClassNodes.Any(c => c.Id == ifaceNode.Id))
+                graph.ClassNodes.Add(ifaceNode);
+        }
     }
 
     private List<(string InterfaceName, string ParamName)> GetConstructorParams(ClassDeclarationSyntax cls, SemanticModel model)

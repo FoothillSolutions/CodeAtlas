@@ -6,6 +6,8 @@ export interface MrGraph {
   totalDeletions: number;
   files: MrFileNode[];
   edges: MrEdge[];
+  classNodes?: MrClassNode[];
+  classEdges?: MrClassEdge[];
   config?: CanvasConfig;
   schemaVersion?: number;
 }
@@ -65,4 +67,24 @@ export interface CanvasConfig {
   nodeWidth?: number;
   rankDirection?: string;
   maxVisibleLines?: number;
+}
+
+export interface MrClassNode {
+  id: string;
+  className: string;
+  namespace?: string | null;
+  fileId: string;
+  projectName: string;
+  isChanged: boolean;
+  isInterface: boolean;
+  interfaces: string[];
+  methods: string[];
+}
+
+export interface MrClassEdge {
+  fromClassId: string;
+  toClassId: string;
+  type: string;
+  interfaceName?: string;
+  methodCalls: string[];
 }

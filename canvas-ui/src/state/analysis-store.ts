@@ -2,7 +2,7 @@ import { computed } from '@preact/signals';
 import { files, edges } from './graph-store';
 import { colors } from '../theme/tokens';
 
-const riskScores = computed(() => {
+export const riskScores = computed(() => {
   const fileList = files.value;
   const edgeList = edges.value;
 

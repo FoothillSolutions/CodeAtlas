@@ -195,6 +195,7 @@ export const dimensions = {
 
 export const fontStrings = {
   mono11: `11px ${fonts.mono}`,
+  mono12bold: `bold 12px ${fonts.mono}`,
   ui10: `10px ${fonts.ui}`,
   ui11: `11px ${fonts.ui}`,
   ui12: `12px ${fonts.ui}`,
